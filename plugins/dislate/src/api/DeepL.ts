@@ -1,7 +1,7 @@
 import { DeepLResponse } from "../type"
 
 // TODO: Change API link when it'll be down
-const API_URL = "https://deeplx.mingming.dev/translate"
+const API_URL = "https://deeplx.1stg.me/translate"
 
 const translate = async (text: string, source_lang: string = "auto", target_lang: string, original: boolean = false) => {
     try {

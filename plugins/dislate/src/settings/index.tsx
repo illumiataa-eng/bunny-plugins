@@ -6,8 +6,12 @@ import { manifest } from "@vendetta/plugin"
 import { useProxy } from "@vendetta/storage"
 
 import { settings } from ".."
+import { resolveEngine } from "../api"
+import { Strings } from "../strings"
 import TargetLang from "./TargetLang"
 import TranslatorPage from "./TranslatorPage"
+import DiagnosticsPage from "./DiagnosticsPage"
+import LLMSettings from "./LLMSettings"
 
 const { ScrollView, Text } = ReactNative
 const { FormRow, FormSwitchRow } = Forms
@@ -28,36 +32,78 @@ export default () => {
     const navigation = NavigationNative.useNavigation()
     useProxy(settings)
 
+    const engine = resolveEngine(settings.translator)
+
+    // 显示当前目标语言的名字，而不是 zh-cn 这样的代码
+    const targetLanguageName = Object.entries(engine.languages)
+        .find(([, code]) => code === settings.target_lang)?.[0]
+
+    const before = settings.batch_before ?? 2
+    const after = settings.batch_after ?? 2
+
     return (
         <ScrollView>
             <FormSwitchRow
-                label={"Immersive Translation"}
-                subLabel={"Display both original and translation"}
+                label={Strings.IMMERSIVE}
+                subLabel={Strings.IMMERSIVE_DESC}
                 leading={<FormRow.Icon source={getAssetIDByName("ic_chat_bubble_filled_24px")} />}
-                value={settings.immersive_enabled ?? true} // Default enabled
+                value={settings.immersive_enabled ?? true}
                 onValueChange={(v) => {
                     settings.immersive_enabled = v
                 }}
             />
 
+            <FormSwitchRow
+                label={Strings.BATCH}
+                subLabel={Strings.BATCH_DESC(before, after)}
+                leading={<FormRow.Icon source={getAssetIDByName("ic_message_delete")} />}
+                value={settings.batch_enabled ?? true}
+                onValueChange={(v) => {
+                    settings.batch_enabled = v
+                }}
+            />
+
             <FormRow
-                label={"Translate to"}
-                subLabel={settings.target_lang?.toLowerCase()}
+                label={Strings.TRANSLATE_TO}
+                subLabel={targetLanguageName ?? settings.target_lang?.toLowerCase()}
                 leading={<FormRow.Icon source={getAssetIDByName("ic_activity_24px")} />}
                 trailing={() => <FormRow.Arrow />}
                 onPress={() => navigation.push("VendettaCustomPage", {
-                    title: "Translate to",
+                    title: Strings.TRANSLATE_TO,
                     render: TargetLang,
                 })}
             />
+
             <FormRow
-                label={"Translator"}
-                subLabel={settings.translator ? "Google Translate" : "DeepL"}
+                label={Strings.ENGINE}
+                subLabel={engine.label}
                 leading={<FormRow.Icon source={getAssetIDByName("ic_locale_24px")} />}
                 trailing={() => <FormRow.Arrow />}
                 onPress={() => navigation.push("VendettaCustomPage", {
-                    title: "Translator",
+                    title: Strings.ENGINE,
                     render: TranslatorPage,
+                })}
+            />
+
+            <FormRow
+                label={Strings.LLM_SETTINGS}
+                subLabel={Strings.LLM_SETTINGS_DESC}
+                leading={<FormRow.Icon source={getAssetIDByName("ic_activity_24px")} />}
+                trailing={() => <FormRow.Arrow />}
+                onPress={() => navigation.push("VendettaCustomPage", {
+                    title: Strings.LLM_SETTINGS,
+                    render: LLMSettings,
+                })}
+            />
+
+            <FormRow
+                label={Strings.DIAGNOSTICS}
+                subLabel={Strings.DIAGNOSTICS_DESC}
+                leading={<FormRow.Icon source={getAssetIDByName("ic_message_delete")} />}
+                trailing={() => <FormRow.Arrow />}
+                onPress={() => navigation.push("VendettaCustomPage", {
+                    title: Strings.DIAGNOSTICS,
+                    render: DiagnosticsPage,
                 })}
             />
 

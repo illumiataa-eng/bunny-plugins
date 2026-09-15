@@ -1,4 +1,6 @@
 // "inspired" by https://github.com/Vendicated/Vencord/blob/main/src/plugins/translate/utils.ts
+import type { TranslationEngine } from "./engine"
+import { GTranslateLangs } from "../lang"
 import { GTranslateResponse } from "../type"
 
 const translate = async (text: string, source_lang: string = "auto", target_lang: string, original: boolean = false) => {
@@ -25,6 +27,13 @@ const translate = async (text: string, source_lang: string = "auto", target_lang
     }
 }
 
-export default { translate }
+const engine: TranslationEngine = {
+    id: "google",
+    label: "Google Translate",
+    languages: GTranslateLangs,
+    translate
+}
+
+export default engine
 
 

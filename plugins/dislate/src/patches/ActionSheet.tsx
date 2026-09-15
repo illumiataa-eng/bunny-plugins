@@ -7,7 +7,11 @@ import { Forms } from "@vendetta/ui/components"
 import { findInReactTree } from "@vendetta/utils"
 import { settings } from ".."
 
-import { DeepL, GTranslate } from "../api"
+import { resolveEngine } from "../api"
+import { translateWithProtection } from "../translation"
+import { selectContextWindow, translateBatch, DEFAULT_WINDOW_BEFORE, DEFAULT_WINDOW_AFTER } from "../batch"
+import { diagnostics, translationCache } from "../state"
+import { Strings } from "../strings"
 import { showToast } from "@vendetta/ui/toasts"
 import { logger } from "@vendetta"
 
@@ -25,7 +29,30 @@ const styles = stylesheet.createThemedStyleSheet({
     }
 })
 
-let cachedData: object[] = []
+/**
+ * 从频道历史里取出以目标消息为中心的上下文窗口。
+ * 不可翻译（图片、系统提示）与已翻译过的都会被跳过。
+ */
+const collectContextWindow = (channelId: string, targetId: string) => {
+    const store: any = MessageStore.getMessages(channelId)
+    const all: any[] = store?._array ?? []
+
+    return selectContextWindow(
+        all.map(m => ({
+            id: m.id,
+            content: m.content ?? "",
+            type: m.type,
+            state: m.state,
+            blocked: m.blocked
+        })),
+        targetId,
+        {
+            before: settings.batch_before ?? DEFAULT_WINDOW_BEFORE,
+            after: settings.batch_after ?? DEFAULT_WINDOW_AFTER,
+            alreadyTranslated: new Set(translationCache.ids())
+        }
+    )
+}
 
 export default () => before("openLazy", LazyActionSheet, ([component, key, msg]) => {
     const message = msg?.message
@@ -49,74 +76,139 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
 
             const messageId = originalMessage?.id ?? message.id
             const messageContent = originalMessage?.content ?? message.content
-            const existingCachedObject = cachedData.find((o: any) => Object.keys(o)[0] === messageId)
 
-            const translateType = existingCachedObject ? "Revert" : "Translate"
-            const icon = translateType === "Translate" ? getAssetIDByName("LanguageIcon") : getAssetIDByName("ic_highlight")
+            const alreadyTranslated = translationCache.has(messageId)
+
+            // 菜单项文案不能靠拼 `${type} Message` —— 中文语序不同，
+            // 所以这里直接取整句。
+            const actionLabel = alreadyTranslated ? Strings.REVERT_MESSAGE : Strings.TRANSLATE_MESSAGE
+            const icon = alreadyTranslated
+                ? getAssetIDByName("ic_highlight")
+                : getAssetIDByName("LanguageIcon")
 
             const translate = async () => {
                 LazyActionSheet.hideActionSheet()
                 try {
                     const target_lang = settings.target_lang
-                    const isTranslated = translateType === "Translate"
+                    const isTranslated = !alreadyTranslated
                     const isImmersive = settings.immersive_enabled
 
                     if (!originalMessage) return
 
-                    const emojiRegex = /<(a?):\w+:\d+>|<@!?\d+>|<#\d+>/g
-                    const placeholders: string[] = []
-                    const textToTranslate = messageContent.replace(emojiRegex, (match: string) => {
-                        placeholders.push(match)
-                        return ` [[${placeholders.length - 1}]] `
-                    })
-                    
-                    let translateResult
-                    switch(settings.translator) {
-                        case 0:
-                            translateResult = await DeepL.translate(textToTranslate, undefined, target_lang, !isTranslated)
-                            break
-                        case 1:
-                            translateResult = await GTranslate.translate(textToTranslate, undefined, target_lang, !isTranslated)
-                            break
+                    const channelId = originalMessage.channel_id
+                    const engine = resolveEngine(settings.translator)
+                    const langTag = `\`[${target_lang?.toLowerCase()}]\``
+
+                    const dispatchContent = (id: string, content: string | undefined) => {
+                        FluxDispatcher.dispatch({
+                            type: "MESSAGE_UPDATE",
+                            message: {
+                                id,
+                                channel_id: channelId,
+                                guild_id: ChannelStore.getChannel(channelId)?.guild_id,
+                                content,
+                            },
+                            log_edit: false,
+                            otherPluginBypass: true
+                        })
                     }
 
-                    let translatedText = translateResult.text
-                    placeholders.forEach((original, index) => {
-                        const pRegex = new RegExp(`\\[\\[\\s*${index}\\s*\\]\\]`, 'g')
-                        translatedText = translatedText.replace(pRegex, original)
-                    })
+                    const buildFinal = (original: string, translated: string) =>
+                        isImmersive
+                            ? `${original}${separator}${translated} ${langTag}`
+                            : `${translated} ${langTag}`
 
-                    const finalContent = isTranslated
-                        ? (isImmersive
-                            ? `${messageContent}${separator}${translatedText.trim()} \`[${target_lang?.toLowerCase()}]\``
-                            : `${translatedText.trim()} \`[${target_lang?.toLowerCase()}]\``)
-                        : (existingCachedObject as any)[messageId]
-
-                    FluxDispatcher.dispatch({
-                        type: "MESSAGE_UPDATE",
-                        message: {
-                            id: messageId,
-                            channel_id: originalMessage.channel_id,
-                            guild_id: ChannelStore.getChannel(originalMessage.channel_id)?.guild_id,
-                            content: finalContent,
-                        },
-                        log_edit: false,
-                        otherPluginBypass: true
-                    })
-
-                    if (isTranslated) {
-                        cachedData.unshift({ [messageId]: messageContent })
-                    } else {
-                        cachedData = cachedData.filter((e: any) => e !== existingCachedObject)
+                    // 还原：只处理被点的那一条
+                    if (!isTranslated) {
+                        dispatchContent(messageId, translationCache.get(messageId))
+                        translationCache.forget(messageId)
+                        return
                     }
+
+                    // 批量：以本条为中心，连带上下文一起翻
+                    if (settings.batch_enabled !== false) {
+                        const contextWindow = collectContextWindow(channelId, messageId)
+
+                        if (contextWindow.messages.length > 1) {
+                            const outcome = await translateBatch(
+                                contextWindow,
+                                target_lang,
+                                (text, lang) => engine.translate(text, undefined, lang).then(r => r.text)
+                            )
+
+                            let applied = 0
+
+                            outcome.items.forEach((item, index) => {
+                                // 没翻出来的那条不动它，也绝不拿假内容顶上
+                                if (item.text === undefined) return
+
+                                const wm = contextWindow.messages[index]
+                                dispatchContent(wm.id, buildFinal(wm.content, item.text.trim()))
+                                translationCache.remember(wm.id, wm.content)
+                                applied += 1
+                            })
+
+                            const missingMarkers = outcome.items.reduce(
+                                (sum, item) => sum + item.missing.length, 0
+                            )
+                            if (missingMarkers > 0) {
+                                diagnostics.record({
+                                    source: "translate",
+                                    level: "warn",
+                                    message: `批量译文丢失了 ${missingMarkers} 个标记`,
+                                    detail: `引擎 ${engine.id} · 目标 ${target_lang} · 窗口 ${outcome.items.length} 条`
+                                })
+                            }
+
+                            if (applied > 0) {
+                                if (!outcome.complete) {
+                                    diagnostics.record({
+                                        source: "translate",
+                                        level: "warn",
+                                        message: `${outcome.items.length - applied} 条未翻出，已跳过`,
+                                        detail: `引擎 ${engine.id} · 可降低窗口条数重试`
+                                    })
+                                }
+                                return
+                            }
+                            // 整窗都没翻出来 —— 落到下面走单条
+                        }
+                    }
+
+                    // 单条：占位符抽取、引擎调用、还原都收在 translateWithProtection 里，
+                    // 斜杠命令走同一个函数，不会再出现「一条路径有保护、另一条没有」。
+                    const outcome = await translateWithProtection(
+                        messageContent,
+                        target_lang,
+                        (text, lang) => engine.translate(text, undefined, lang).then(r => r.text)
+                    )
+
+                    if (outcome.missing.length > 0) {
+                        diagnostics.record({
+                            source: "translate",
+                            level: "warn",
+                            message: `译文丢失了 ${outcome.missing.length} 个标记`,
+                            detail: `引擎 ${engine.id} · 目标 ${target_lang} · 原文长度 ${messageContent.length}`
+                        })
+                    }
+
+                    dispatchContent(messageId, buildFinal(messageContent, outcome.text.trim()))
+                    translationCache.remember(messageId, messageContent)
                 } catch (e) {
-                    showToast("Failed to translate message. Please check Debug Logs for more info.", getAssetIDByName("Small"))
+                    diagnostics.record({
+                        source: "translate",
+                        level: "error",
+                        message: "翻译失败",
+                        detail: `引擎 ${resolveEngine(settings.translator).id} · 目标 ${settings.target_lang}`,
+                        error: e
+                    })
+                    showToast(Strings.TRANSLATE_FAILED, getAssetIDByName("Small"))
                     logger.error(e)
                 }
             }
 
             const translateRow = React.createElement(ActionSheetRow, {
-                label: `${translateType} Message`,
+                label: actionLabel,
                 icon: React.createElement(ActionSheetRow.Icon, {
                     source: icon,
                     IconComponent: () => (

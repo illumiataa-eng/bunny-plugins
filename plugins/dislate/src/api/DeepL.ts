@@ -1,3 +1,5 @@
+import type { TranslationEngine } from "./engine"
+import { DeepLLangs } from "../lang"
 import { DeepLResponse } from "../type"
 
 // TODO: Change API link when it'll be down
@@ -24,6 +26,13 @@ const translate = async (text: string, source_lang: string = "auto", target_lang
     }
 }
 
-export default { translate }
+const engine: TranslationEngine = {
+    id: "deepl",
+    label: "DeepL",
+    languages: DeepLLangs,
+    translate
+}
+
+export default engine
 
 

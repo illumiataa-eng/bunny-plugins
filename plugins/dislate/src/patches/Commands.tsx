@@ -8,78 +8,102 @@ import { showConfirmationAlert } from "@vendetta/ui/alerts"
 import { findByProps } from "@vendetta/metro"
 import { settings } from ".."
 
-import { DeepLLangs} from "../lang"
-import { DeepL, GTranslate } from "../api"
+import { resolveEngine } from "../api"
+import { translateWithProtection } from "../translation"
+import { diagnostics } from "../state"
+import { Strings } from "../strings"
 
 const ClydeUtils = findByProps("sendBotMessage")
-const langOptionsDeepL = Object.entries(DeepLLangs).map(([key, value]) => ({
-    name: key,
-    displayName: key,
-    value: value
-}))
 
-// TODO: Make command option somehow vary with different translators
-// const langOptionsGTranslate = Object.entries(GTranslate).map(([key, value]) => ({
-//     name: key,
-//     displayName: key,
-//     value: value
-// }))
-// const langOptions = settings?.translator === 1 ? langOptionsGTranslate : langOptionsDeepL;
+/**
+ * 语言下拉由当前引擎的语言表生成，而不再固定成 DeepL 的表。
+ * （原实现硬编码 choices: [...langOptionsDeepL]，导致用户选了
+ * Google 之后斜杠命令的语言列表仍是 DeepL 的。）
+ *
+ * 注意：choices 在命令注册时求值一次，之后切换引擎需重载客户端。
+ */
+function languageOptions() {
+    return Object.entries(resolveEngine(settings.translator).languages).map(([name, value]) => ({
+        name,
+        displayName: name,
+        value
+    }))
+}
 
 export default () => registerCommand({
     name: "translate",
     displayName: "translate",
-    description: "Send a message using Dislate in any language chosen.",
-    displayDescription: "Send a message using Dislate in any language chosen.",
+    description: Strings.COMMAND_DESC,
+    displayDescription: Strings.COMMAND_DESC,
     applicationId: "-1",
     type: ApplicationCommandType.CHAT as number,
     inputType: ApplicationCommandInputType.BUILT_IN_TEXT as number,
     options: [
         {
             name: "text",
-            displayName: "text",
-            description: "The text/message for Dislate to translate. Please note some formatting of mentions and emojis may break due to the API.",
-            displayDescription: "The text/message for Dislate to translate. Please note some formatting of mentions and emojis may break due to the API.",
+            displayName: Strings.COMMAND_OPT_TEXT,
+            description: Strings.COMMAND_OPT_TEXT_DESC,
+            displayDescription: Strings.COMMAND_OPT_TEXT_DESC,
             type: ApplicationCommandOptionType.STRING as number,
             required: true
         },
         {
             name: "language",
-            displayName: "language",
-            description: "The language that Dislate will translate the text into. This can be any language from the list.",
-            displayDescription: "The language that Dislate will translate the text into. This can be any language from the list.",
+            displayName: Strings.COMMAND_OPT_LANG,
+            description: Strings.COMMAND_OPT_LANG_DESC,
+            displayDescription: Strings.COMMAND_OPT_LANG_DESC,
             type: ApplicationCommandOptionType.STRING as number,
             // @ts-ignore
-            choices: [...langOptionsDeepL],
+            choices: languageOptions(),
             required: true
         }
     ],
     async execute(args, ctx) {
         const [text, lang] = args
         try {
-            var content
-            switch(settings.translator) {
-                case 0:
-                    content = await DeepL.translate(text.value, undefined, lang.value)
-                    break
-                case 1:
-                    content = await GTranslate.translate(text.value, undefined, lang.value)
-                    break
+            const engine = resolveEngine(settings.translator)
+
+            // 与长按菜单共用同一个流程，占位符同样受保护。
+            // 修复前这条路径完全没有抽取/还原，/translate 里的 <@123>
+            // 会被原样送进翻译引擎，被翻坏或吞掉。
+            const outcome = await translateWithProtection(
+                text.value,
+                lang.value,
+                (t, l) => engine.translate(t, undefined, l).then(r => r.text)
+            )
+
+            if (outcome.missing.length > 0) {
+                diagnostics.record({
+                    source: "translate",
+                    level: "warn",
+                    message: `译文丢失了 ${outcome.missing.length} 个标记`,
+                    detail: `来源 斜杠命令 · 引擎 ${engine.id} · 目标 ${lang.value}`
+                })
             }
+
+            const translated = outcome.text
+
             return await new Promise((resolve): void => showConfirmationAlert({
-                title: "Are you sure you want to send it?",
+                title: Strings.CONFIRM_SEND_TITLE,
                 content: (
                     <Codeblock>
-                        {content.text}
+                        {translated}
                     </Codeblock>
                     ),
-                confirmText: "Yep, send it!",
-                onConfirm: () => resolve({ content: content.text }),
-                cancelText: "Nope, don't send it"
+                confirmText: Strings.CONFIRM_SEND_YES,
+                onConfirm: () => resolve({ content: translated }),
+                cancelText: Strings.CONFIRM_SEND_NO
             }))
         } catch (e) {
+            diagnostics.record({
+                source: "translate",
+                level: "error",
+                message: "斜杠命令翻译失败",
+                detail: `引擎 ${resolveEngine(settings.translator).id} · 目标 ${lang.value}`,
+                error: e
+            })
             logger.error(e)
-            return ClydeUtils.sendBotMessage(ctx.channel.id, "Failed to translate message. Please check Debug Logs for more info.")
+            return ClydeUtils.sendBotMessage(ctx.channel.id, Strings.TRANSLATE_FAILED)
         }
     }
 })

@@ -1,10 +1,12 @@
 {
 	"private": true,
 	"scripts": {
-		"build": "node build.mjs"
+		"build": "node build.mjs",
+		"typecheck": "tsc -p tsconfig.check.json",
+		"test": "node --experimental-strip-types --import ./scripts/test-setup.mjs --test \"plugins/**/*.test.ts\""
 	},
 	"dependencies": {
-		"@swc/helpers": "^0.4.37"
+		"@swc/helpers": "^0.5.17"
 	},
 	"devDependencies": {
 		"@rollup/plugin-commonjs": "^24.1.0",
@@ -13,6 +15,7 @@
 		"esbuild": "^0.16.17",
 		"rollup": "^3.29.5",
 		"rollup-plugin-esbuild": "^5.0.0",
+		"typescript": "^5.9.3",
 		"vendetta-types": "latest"
 	},
 	"pnpm": {
@@ -22,5 +25,8 @@
 				"react-native"
 			]
 		}
+	},
+	"overrides": {
+		"@types/react": "18.0.26"
 	}
 }

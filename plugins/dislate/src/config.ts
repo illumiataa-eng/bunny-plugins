@@ -22,8 +22,6 @@ export const settings: {
     translator?: string | number
     immersive_enabled?: boolean
 
-    /** 批量翻译：连带上下文一起翻 */
-    batch_enabled?: boolean
     /** 上下文窗口：目标消息之前取几条 */
     batch_before?: number
     /** 上下文窗口：目标消息之后取几条 */
@@ -40,6 +38,5 @@ export const settings: {
 settings.target_lang ??= "en"
 settings.translator ??= DEFAULT_ENGINE_ID
 settings.immersive_enabled ??= true
-settings.batch_enabled ??= true
 settings.batch_before ??= DEFAULT_WINDOW_BEFORE
 settings.batch_after ??= DEFAULT_WINDOW_AFTER

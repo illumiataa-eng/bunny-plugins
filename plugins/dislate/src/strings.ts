@@ -12,7 +12,9 @@
 
 export const Strings = {
     // ── 长按消息菜单 ──────────────────────────────────────────
+    // 单条与含上下文是并列的两个入口，不是二选一的开关
     TRANSLATE_MESSAGE: "翻译消息",
+    TRANSLATE_WITH_CONTEXT: "翻译消息（含上下文）",
     REVERT_MESSAGE: "还原消息",
 
     // ── 斜杠命令 ──────────────────────────────────────────────
@@ -28,9 +30,9 @@ export const Strings = {
     // ── 设置主页 ──────────────────────────────────────────────
     IMMERSIVE: "沉浸式翻译",
     IMMERSIVE_DESC: "同时显示原文与译文",
-    BATCH: "批量翻译",
-    BATCH_DESC: (before: number, after: number) =>
-        `连带上下文一起翻（上 ${before} 条 / 下 ${after} 条），已翻译的自动跳过`,
+    CONTEXT_WINDOW: "上下文范围",
+    CONTEXT_WINDOW_DESC: (before: number, after: number) =>
+        `「含上下文」时向上 ${before} 条、向下 ${after} 条，已翻译的自动跳过`,
     TRANSLATE_TO: "翻译为",
     ENGINE: "翻译引擎",
     LLM_SETTINGS: "LLM 设置",

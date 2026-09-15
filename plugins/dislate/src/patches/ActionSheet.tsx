@@ -79,18 +79,15 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
 
             const alreadyTranslated = translationCache.has(messageId)
 
-            // 菜单项文案不能靠拼 `${type} Message` —— 中文语序不同，
-            // 所以这里直接取整句。
-            const actionLabel = alreadyTranslated ? Strings.REVERT_MESSAGE : Strings.TRANSLATE_MESSAGE
-            const icon = alreadyTranslated
-                ? getAssetIDByName("ic_highlight")
-                : getAssetIDByName("LanguageIcon")
+            // 菜单文案直接取整句：中文语序与英文不同，
+            // 拼 `${type} Message` 那种写法在中文里拼不出来。
 
-            const translate = async () => {
+            // withContext = true → 连带上下文一起翻；false → 只翻这一条。
+            // 两种模式是并列的两个入口，不再由设置里的开关二选一。
+            const runTranslate = async (withContext: boolean) => {
                 LazyActionSheet.hideActionSheet()
                 try {
                     const target_lang = settings.target_lang
-                    const isTranslated = !alreadyTranslated
                     const isImmersive = settings.immersive_enabled
 
                     if (!originalMessage) return
@@ -119,14 +116,14 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
                             : `${translated} ${langTag}`
 
                     // 还原：只处理被点的那一条
-                    if (!isTranslated) {
+                    if (alreadyTranslated) {
                         dispatchContent(messageId, translationCache.get(messageId))
                         translationCache.forget(messageId)
                         return
                     }
 
-                    // 批量：以本条为中心，连带上下文一起翻
-                    if (settings.batch_enabled !== false) {
+                    // 含上下文：以本条为中心，连带上下若干条一起翻
+                    if (withContext) {
                         const contextWindow = collectContextWindow(channelId, messageId)
 
                         if (contextWindow.messages.length > 1) {
@@ -171,11 +168,12 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
                                 }
                                 return
                             }
-                            // 整窗都没翻出来 —— 落到下面走单条
+                            // 整窗都没翻出来 —— 降级走下面的单条
                         }
+                        // 窗口里只有本条（附近没有可翻的上下文）时，同样降级走单条
                     }
 
-                    // 单条：占位符抽取、引擎调用、还原都收在 translateWithProtection 里，
+                    // 单条（同时是「含上下文」的兜底）：占位符抽取、引擎调用、还原都收在
                     // 斜杠命令走同一个函数，不会再出现「一条路径有保护、另一条没有」。
                     const outcome = await translateWithProtection(
                         messageContent,
@@ -207,20 +205,32 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
                 }
             }
 
-            const translateRow = React.createElement(ActionSheetRow, {
-                label: actionLabel,
-                icon: React.createElement(ActionSheetRow.Icon, {
-                    source: icon,
-                    IconComponent: () => (
-                        <ReactNative.Image
-                            resizeMode="cover"
-                            style={styles.iconComponent}
-                            source={icon}
-                        />
-                    )
-                }),
-                onPress: translate
-            })
+            const makeRow = (label: string, iconName: string, onPress: () => void) => {
+                const source = getAssetIDByName(iconName)
+                return React.createElement(ActionSheetRow, {
+                    label,
+                    icon: React.createElement(ActionSheetRow.Icon, {
+                        source,
+                        IconComponent: () => (
+                            <ReactNative.Image
+                                resizeMode="cover"
+                                style={styles.iconComponent}
+                                source={source}
+                            />
+                        )
+                    }),
+                    onPress
+                })
+            }
+
+            // 已翻译 → 只给还原；未翻译 → 单条与含上下文并列两项，
+            // 由用户当场决定翻多少，而不是先去设置里切换开关。
+            const rows = alreadyTranslated
+                ? [makeRow(Strings.REVERT_MESSAGE, "ic_highlight", () => runTranslate(false))]
+                : [
+                    makeRow(Strings.TRANSLATE_MESSAGE, "LanguageIcon", () => runTranslate(false)),
+                    makeRow(Strings.TRANSLATE_WITH_CONTEXT, "ic_chat_bubble_filled_24px", () => runTranslate(true))
+                ]
 
             // Inject into the first valid ActionSheetRow array inside groups
             if (groups?.length) {
@@ -230,7 +240,7 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
                         (c: any) => Array.isArray(c) && c.some((child: any) => child?.type?.name === "ActionSheetRow")
                     )
                     if (groupChildren) {
-                        groupChildren.unshift(translateRow)
+                        groupChildren.unshift(...rows)
                         return
                     }
                 }
@@ -239,7 +249,7 @@ export default () => before("openLazy", LazyActionSheet, ([component, key, msg])
             // Fallback injection if tree searching fails
             const buttons = findInReactTree(component, (x: any) => Array.isArray(x) && x[0]?.type?.name === "ActionSheetRow")
             if (buttons) {
-                buttons.unshift(translateRow)
+                buttons.unshift(...rows)
             }
         })
     }).catch((err: any) => {

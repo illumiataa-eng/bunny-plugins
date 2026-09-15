@@ -53,14 +53,12 @@ export default () => {
                 }}
             />
 
-            <FormSwitchRow
-                label={Strings.BATCH}
-                subLabel={Strings.BATCH_DESC(before, after)}
+            {/* 不再提供「批量翻译」开关：单条与含上下文已是长按菜单里
+                并列的两个入口，选哪个由用户当场决定，无需预先配置。 */}
+            <FormRow
+                label={Strings.CONTEXT_WINDOW}
+                subLabel={Strings.CONTEXT_WINDOW_DESC(before, after)}
                 leading={<FormRow.Icon source={getAssetIDByName("ic_message_delete")} />}
-                value={settings.batch_enabled ?? true}
-                onValueChange={(v) => {
-                    settings.batch_enabled = v
-                }}
             />
 
             <FormRow

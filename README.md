@@ -1,4 +1,7 @@
 # Rico040's Bunny Plugins
+
+> **This is a personal fork of [rico040/bunny-plugins](https://github.com/rico040/bunny-plugins).** Dislate Lite published here adds LLM-backed translation, context-aware translation, and robustness fixes on top of the upstream version.
+
 These are Vendetta plugins patched to work with [Bunny](https://github.com/bunny-mod) on new discord versions. Credits goes to original devs of their respective plugin. 
 
 # How to install?
@@ -16,9 +19,9 @@ Adds /bfeval command.
 > https://rico040.github.io/bunny-plugins/bf-eval/
 
 ## Dislate Lite
-Translates text into a desired language.
+Translates messages with an LLM, optionally including surrounding context.
 
-> https://rico040.github.io/bunny-plugins/dislate/
+> https://illumiataa-eng.github.io/bunny-plugins/dislate/
 
 ## Freemoji
 Allows you to use Nitro emoji without Nitro.

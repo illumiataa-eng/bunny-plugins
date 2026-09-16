@@ -1,6 +1,6 @@
 {
     "name": "Dislate Lite",
-    "description": "Translates text into a desired language.",
+    "description": "Translates messages with an LLM, optionally including surrounding context.",
     "authors": [
         {
             "name": "Acquite",
